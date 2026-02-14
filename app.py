@@ -84,7 +84,7 @@ def run_parametric_sweep(min_size, max_size, num_points):
 
 # Streamlit UI
 st.title("✈️ Airplane Design Cascade Optimizer")
-st.markdown("### Interactive OpenMDAO Model for Windshield Sizing")
+st.markdown("### Interactive Model for Windshield Sizing")
 
 # Sidebar for inputs
 with st.sidebar:
@@ -156,7 +156,7 @@ if mode == "Single Point":
                 line=dict(width=3, color='#95E1D3'),
                 text=[f'{v:.2f}' for v in values],
                 textposition='top center',
-                textfont=dict(size=14, color='#2C3E50')
+                textfont=dict(size=15, color='#2C3E50')
             ))
             
             fig.update_layout(
@@ -164,36 +164,15 @@ if mode == "Single Point":
                     tickmode='array',
                     tickvals=list(range(len(stages))),
                     ticktext=stages,
-                    tickfont=dict(size=12)
+                    tickfont=dict(size=14)
                 ),
                 yaxis_title="Value",
-                height=400,
+                height=500,
                 showlegend=False,
                 hovermode='x unified'
             )
             
             st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        st.subheader("📝 Model Details")
-        st.info("""
-        **Cascade Flow:**
-        
-        1. **Thermal Model**  
-           Heat Load = 2.5 × Size + 10
-        
-        2. **Cooling System**  
-           Weight = 0.5 × Heat + 50
-        
-        3. **Performance**  
-           Fuel = 0.8 × Weight + 1.2 × Size
-        """)
-        
-        if 'last_results' in st.session_state:
-            st.success("✅ Model converged successfully!")
-            
-            with st.expander("View Raw Data"):
-                st.json(st.session_state.last_results)
 
 else:  # Parametric Sweep
     st.subheader("📈 Parametric Sweep Analysis")
@@ -268,4 +247,3 @@ else:  # Parametric Sweep
 
 # Footer
 st.markdown("---")
-st.markdown("**Built with OpenMDAO + Streamlit** | [Documentation](https://openmdao.org)")
