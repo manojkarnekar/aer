@@ -2,68 +2,57 @@ import streamlit as st
 import openmdao.api as om
 import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
 
 # Set page config
 st.set_page_config(
-    page_title="Airplane Design Optimizer",
+    page_title="Design Optimizer",
     page_icon="✈️",
     layout="wide"
 )
 
-# 1. Define the Thermal Model (Physics or ML Surrogate)
+# --- PHYSICS MODELS ---
 class ThermalComponent(om.ExplicitComponent):
     def setup(self):
-        self.add_input('windshield_size', val=1.0)
-        self.add_output('heat_load', val=1.0)
+        self.add_input('windshield_size', val=2.5)
+        self.add_output('heat_load', val=4.0)
 
     def compute(self, inputs, outputs):
-        # Simple physics: Heat scales linearly with size
-        # In real life, replace this line with a Neural Network prediction
-        outputs['heat_load'] = 2.5 * inputs['windshield_size'] + 10
+        outputs['heat_load'] = (1.1 * inputs['windshield_size']) + 1.5
 
-# 2. Define the Weight/Cooling Model
 class CoolingSystemComponent(om.ExplicitComponent):
     def setup(self):
-        self.add_input('heat_load', val=1.0)
-        self.add_output('system_weight', val=1.0)
+        self.add_input('heat_load', val=4.0)
+        self.add_output('system_weight', val=100.0)
 
     def compute(self, inputs, outputs):
-        # The cooling system weight depends on the heat load
-        outputs['system_weight'] = 0.5 * inputs['heat_load'] + 50
+        outputs['system_weight'] = (22.0 * inputs['heat_load']) + 30.0
 
-# 3. Define the Performance Model (Fuel Consumption)
 class FuelComponent(om.ExplicitComponent):
     def setup(self):
-        self.add_input('system_weight', val=1.0)
-        self.add_input('windshield_size', val=1.0) # Drag also increases with size
-        self.add_output('fuel_burn', val=1.0)
+        self.add_input('system_weight', val=100.0)
+        self.add_input('windshield_size', val=2.5) 
+        self.add_output('fuel_burn', val=150.0)
 
     def compute(self, inputs, outputs):
-        # Fuel burn increases with both Weight and Drag (size)
-        weight_penalty = 0.8 * inputs['system_weight']
-        drag_penalty = 1.2 * inputs['windshield_size']
+        weight_penalty = 0.05 * inputs['system_weight']
+        drag_penalty = 8.0 * (inputs['windshield_size']**1.2)
         outputs['fuel_burn'] = weight_penalty + drag_penalty
 
-# 4. Build the Group (The "Cascade")
 class AirplaneCascade(om.Group):
     def setup(self):
-        # Add the subsystems
         self.add_subsystem('thermal', ThermalComponent(), promotes=['windshield_size'])
         self.add_subsystem('cooling', CoolingSystemComponent())
         self.add_subsystem('perf', FuelComponent(), promotes=['fuel_burn', 'windshield_size'])
-
-        # Connect the cascade: Thermal -> Cooling -> Performance
         self.connect('thermal.heat_load', 'cooling.heat_load')
         self.connect('cooling.system_weight', 'perf.system_weight')
 
 def run_model(windshield_size):
-    """Run the OpenMDAO model with given parameters"""
     prob = om.Problem()
     prob.model = AirplaneCascade()
     prob.setup()
     prob.set_val('windshield_size', windshield_size)
     prob.run_model()
-    
     return {
         'windshield_size': prob.get_val('windshield_size')[0],
         'heat_load': prob.get_val('thermal.heat_load')[0],
@@ -71,179 +60,151 @@ def run_model(windshield_size):
         'fuel_burn': prob.get_val('fuel_burn')[0]
     }
 
-def run_parametric_sweep(min_size, max_size, num_points):
-    """Run model over a range of windshield sizes"""
-    sizes = [min_size + (max_size - min_size) * i / (num_points - 1) for i in range(num_points)]
-    results = []
-    
-    for size in sizes:
-        result = run_model(size)
-        results.append(result)
-    
-    return pd.DataFrame(results)
+def create_windshield_viz(area):
+    """
+    Realistic aircraft cockpit windshield visualization.
+    Area controls overall size.
+    """
 
-# Streamlit UI
-st.title("✈️ Airplane Design Cascade Optimizer")
-st.markdown("### Interactive Model for Windshield Sizing")
+    # --- Scale geometry from area ---
+    width = np.sqrt(area * 2.2)       # lateral span
+    height = area / width             # vertical size
+    depth = width * 0.6               # curvature depth
 
-# Sidebar for inputs
+    # Surface resolution
+    u = np.linspace(-1, 1, 30)
+    v = np.linspace(0, 1, 20)
+    U, V = np.meshgrid(u, v)
+
+    # --- Curved windshield surface ---
+    # Elliptical wrap + backward rake
+    X = depth * (1 - V**1.5)           # backward rake
+    Y = (width / 2) * U * (1 - 0.3*V)  # taper towards top
+    Z = height * V**1.2                # curved vertical rise
+
+    fig = go.Figure()
+
+    # Windshield glass
+    fig.add_trace(go.Surface(
+        x=X, y=Y, z=Z,
+        colorscale=[[0, "rgba(135,206,235,0.9)"],
+                    [1, "rgba(180,220,255,0.9)"]],
+        showscale=False,
+        name="Windshield"
+    ))
+
+    # --- Cockpit frame outline ---
+    frame_u = np.linspace(-1, 1, 50)
+    frame_x = np.zeros_like(frame_u)
+    frame_y = (width / 2) * frame_u
+    frame_z = np.zeros_like(frame_u)
+
+    fig.add_trace(go.Scatter3d(
+        x=frame_x,
+        y=frame_y,
+        z=frame_z,
+        mode="lines",
+        line=dict(color="black", width=6),
+        showlegend=False
+    ))
+
+    # --- Nose hint (for realism) ---
+    nose_theta = np.linspace(-np.pi/2, np.pi/2, 40)
+    nose_x = -0.15 * np.cos(nose_theta)
+    nose_y = (width / 2) * np.sin(nose_theta)
+    nose_z = -0.15 * np.ones_like(nose_theta)
+
+    fig.add_trace(go.Scatter3d(
+        x=nose_x,
+        y=nose_y,
+        z=nose_z,
+        mode="lines",
+        line=dict(color="gray", width=3),
+        showlegend=False
+    ))
+
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            zaxis=dict(visible=False),
+            aspectmode="data",
+            camera=dict(
+                eye=dict(x=1.6, y=1.2, z=0.8)
+            )
+        ),
+        margin=dict(l=0, r=0, b=0, t=0),
+        height=350
+    )
+
+    return fig
+
+
+# --- STREAMLIT UI ---
+st.title("Design Cascade Optimizer")
+
 with st.sidebar:
-    st.header("⚙️ Model Parameters")
-    
-    mode = st.radio("Analysis Mode", ["Single Point", "Parametric Sweep"])
-    
-    if mode == "Single Point":
-        windshield_size = st.slider(
-            "Windshield Size",
-            min_value=0.5,
-            max_value=10.0,
-            value=3.0,
-            step=0.1,
-            help="Size of the windshield (arbitrary units)"
-        )
-    else:
-        st.subheader("Sweep Range")
-        min_size = st.number_input("Minimum Size", value=0.5, min_value=0.1, max_value=5.0)
-        max_size = st.number_input("Maximum Size", value=10.0, min_value=min_size + 0.1, max_value=15.0)
-        num_points = st.slider("Number of Points", min_value=5, max_value=50, value=20)
-    
-    run_button = st.button("🚀 Run Analysis", type="primary", use_container_width=True)
+    st.header("⚙️ Parameters")
+    windshield_size = st.slider("Windshield Area (m²)", 1.0, 10.0, 3.6, 0.1)
+    run_button = st.button("Update Analysis", type="primary", use_container_width=True)
 
-# Main content
-if mode == "Single Point":
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.subheader("📊 Analysis Results")
-        
-        if run_button or 'last_size' not in st.session_state:
-            with st.spinner("Running model..."):
-                results = run_model(windshield_size)
-                st.session_state.last_results = results
-                st.session_state.last_size = windshield_size
-        
-        if 'last_results' in st.session_state:
-            results = st.session_state.last_results
-            
-            # Display results in metrics
-            metric_cols = st.columns(4)
-            with metric_cols[0]:
-                st.metric("Windshield Size", f"{results['windshield_size']:.2f}")
-            with metric_cols[1]:
-                st.metric("Heat Load", f"{results['heat_load']:.2f}")
-            with metric_cols[2]:
-                st.metric("System Weight", f"{results['system_weight']:.2f}")
-            with metric_cols[3]:
-                st.metric("Fuel Burn", f"{results['fuel_burn']:.2f}")
-            
-            # Flow diagram
-            st.subheader("🔄 Design Cascade Flow")
-            fig = go.Figure()
-            
-            stages = ['Windshield\nSize', 'Heat\nLoad', 'System\nWeight', 'Fuel\nBurn']
-            values = [
-                results['windshield_size'],
-                results['heat_load'],
-                results['system_weight'],
-                results['fuel_burn']
-            ]
-            
-            fig.add_trace(go.Scatter(
-                x=list(range(len(stages))),
-                y=values,
-                mode='lines+markers+text',
-                marker=dict(size=15, color=['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A']),
-                line=dict(width=3, color='#95E1D3'),
-                text=[f'{v:.2f}' for v in values],
-                textposition='top center',
-                textfont=dict(size=15, color='#2C3E50')
-            ))
-            
-            fig.update_layout(
-                xaxis=dict(
-                    tickmode='array',
-                    tickvals=list(range(len(stages))),
-                    ticktext=stages,
-                    tickfont=dict(size=14)
-                ),
-                yaxis_title="Value",
-                height=500,
-                showlegend=False,
-                hovermode='x unified'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
+# Run logic
+res = run_model(windshield_size)
 
-else:  # Parametric Sweep
-    st.subheader("📈 Parametric Sweep Analysis")
-    
-    if run_button or 'sweep_data' not in st.session_state:
-        with st.spinner("Running parametric sweep..."):
-            df = run_parametric_sweep(min_size, max_size, num_points)
-            st.session_state.sweep_data = df
-    
-    if 'sweep_data' in st.session_state:
-        df = st.session_state.sweep_data
-        
-        # Create plots
-        fig = go.Figure()
-        
-        fig.add_trace(go.Scatter(
-            x=df['windshield_size'],
-            y=df['heat_load'],
-            mode='lines+markers',
-            name='Heat Load',
-            line=dict(width=2)
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=df['windshield_size'],
-            y=df['system_weight'],
-            mode='lines+markers',
-            name='System Weight',
-            line=dict(width=2)
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=df['windshield_size'],
-            y=df['fuel_burn'],
-            mode='lines+markers',
-            name='Fuel Burn',
-            line=dict(width=2)
-        ))
-        
-        fig.update_layout(
-            xaxis_title="Windshield Size",
-            yaxis_title="Value",
-            height=500,
-            hovermode='x unified',
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            )
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Data table
-        with st.expander("📋 View Data Table"):
-            st.dataframe(
-                df.style.format("{:.3f}"),
-                use_container_width=True,
-                hide_index=True
-            )
-        
-        # Download button
-        csv = df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Results (CSV)",
-            data=csv,
-            file_name="airplane_cascade_results.csv",
-            mime="text/csv"
-        )
+# 1. Geometry Visualization Section
+col_left, col_right = st.columns([1, 2])
+with col_left:
+    st.subheader("Design Geometry")
+    st.write(f"Current Area: **{windshield_size} m²**")
+    st.plotly_chart(create_windshield_viz(windshield_size), use_container_width=True)
 
-# Footer
-st.markdown("---")
+# 2. Centered Metrics Section
+st.divider()
+st.subheader("System Dependency Cascade")
+
+# Custom CSS to perfectly center the arrow vertically and horizontally
+st.markdown("""
+    <style>
+    .centered-arrow-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100px;
+    }
+    .arrow-text {
+        font-size: 30px;
+        color: #555;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+m1, a1, m2, a2, m3, a3, m4 = st.columns([2, 0.5, 2, 0.5, 2, 0.5, 2])
+
+with m1:
+    st.metric("Windshield Area (m²)", f"{res['windshield_size']:.1f}")
+    st.caption("Initial Design Choice")
+with a1:
+    st.markdown('<div class="centered-arrow-container"><span class="arrow-text">➡️</span></div>', unsafe_allow_html=True)
+with m2:
+    st.metric("Cabin Heat Load (kW)", f"{res['heat_load']:.1f}")
+    st.caption("Thermal Impact")
+with a2:
+    st.markdown('<div class="centered-arrow-container"><span class="arrow-text">➡️</span></div>', unsafe_allow_html=True)
+with m3:
+    st.metric("Cooling Sys Weight (kg)", f"{res['system_weight']:.1f}")
+    st.caption("Structural Impact")
+with a3:
+    st.markdown('<div class="centered-arrow-container"><span class="arrow-text">➡️</span></div>', unsafe_allow_html=True)
+with m4:
+    st.metric("Mission Fuel Burn (kg)", f"{res['fuel_burn']:.1f}")
+    st.caption("Final Performance Cost")
+
+# 3. Data Trends
+st.divider()
+st.subheader("📈 Performance Impact")
+fig_trend = go.Figure()
+stages = ['Windshield Area', 'Heat Load', 'System Weight', 'Fuel Burn']
+values = [res['windshield_size'], res['heat_load'], res['system_weight'], res['fuel_burn']]
+fig_trend.add_trace(go.Scatter(x=stages, y=values, mode='lines+markers+text', text=[f'{v:.1f}' for v in values], textposition='top center'))
+fig_trend.update_layout(height=400)
+st.plotly_chart(fig_trend, use_container_width=True)
