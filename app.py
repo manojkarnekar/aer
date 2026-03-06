@@ -162,21 +162,21 @@ with col_right:
     st.subheader("Regulatory Compliance")
     fuel = res['fuel_burn']
     st.write(f"Evaluating limits based on Mission Fuel Burn: **{fuel:.1f} kg**")
-    
+
     # Logic for compliances based on fuel burn thresholds
     def get_status_mark(violated):
         return "❌" if violated else "✅"
-    
+
     icao_violated = fuel > 64.4
     corsia_violated = fuel > 102.0
     faa_violated = fuel > 79.1
     easa_violated = fuel > 102.0
-    
+
     st.markdown(f"**{get_status_mark(icao_violated)} ICAO CO₂ Emissions Standard for Aeroplanes**")
     st.markdown(f"**{get_status_mark(corsia_violated)} CORSIA**")
     st.markdown(f"**{get_status_mark(faa_violated)} FAA, 14 CFR Part 34**")
     st.markdown(f"**{get_status_mark(easa_violated)} EASA, CS-34**")
-    
+
     if icao_violated or corsia_violated or faa_violated or easa_violated:
         st.error("Warning: One or more emissions compliance standards are currently violated due to excessive fuel burn.")
     else:
